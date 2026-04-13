@@ -11,7 +11,7 @@ const State = (() => {
   let zones = [];
   let passLines = [];
   let freeDraws = [];
-  let ball = { x: 400, y: 270, visible: true };
+  let ball = { x: 450, y: 303, visible: true };
   let selectedId = null;
   let selectedArrowIdx = null;
   let currentTool = 'select';
@@ -22,9 +22,10 @@ const State = (() => {
   let speedMultiplier = 1;
   let undoStack = [];
   let redoStack = [];
+  let currentZoneShape = 'ellipse';
 
-  const PITCH_W = 800;
-  const PITCH_H = 540;
+  const PITCH_W = 900;
+  const PITCH_H = 607;
 
   function snapshot() {
     return JSON.parse(JSON.stringify({
@@ -98,6 +99,8 @@ const State = (() => {
     snapshot, pushUndo, undo, redo,
     get undoStack() { return undoStack; },
     get redoStack() { return redoStack; },
+    get currentZoneShape() { return currentZoneShape; },
+    set currentZoneShape(v) { currentZoneShape = v; },
   };
 })();
 
@@ -153,8 +156,8 @@ const Formations = (() => {
     ]
   };
 
-  const POS_HOME = ['GK','RB','CB','CB','LB','CDM','CM','CDM','CAM','RW','ST','LW'];
-  const POS_AWAY = ['GK','LB','CB','CB','RB','CM','CM','CAM','LW','ST','RW'];
+  const POS_HOME = ['GK','LB','CB','CB','RB','CDM','CM','CDM','CAM','RW','ST','LW'];
+  const POS_AWAY = ['GK','RB','CB','CB','LB','CM','CM','CAM','LW','ST','RW'];
 
   function apply(name, away = false) {
     const positions = PRESETS[name] || PRESETS['4-3-3'];
@@ -195,6 +198,9 @@ const PitchRenderer = (() => {
   function draw() {
     const svg = document.getElementById('pitch-svg');
     const W = State.PITCH_W, H = State.PITCH_H;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', H);
 
     let stripes = '';
     const stripeW = 50;
@@ -221,6 +227,13 @@ const PitchRenderer = (() => {
           <feGaussianBlur stdDeviation="3" result="blur"/>
           <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
+        <clipPath id="ball-clip">
+          <circle r="9"/>
+        </clipPath>
+        <radialGradient id="ball-grad" cx="38%" cy="30%" r="65%">
+          <stop offset="0%" stop-color="#ffffff"/>
+          <stop offset="100%" stop-color="#c8c8c8"/>
+        </radialGradient>
       </defs>
 
       <g id="pitch-bg">${stripes}</g>
@@ -368,9 +381,7 @@ const Renderer = (() => {
 
       const sx = player.x, sy = player.y;
       const ex = a.ex, ey = a.ey;
-      const mx = (sx + ex) / 2 + (ey - sy) * 0.15;
-      const my = (sy + ey) / 2 - (ex - sx) * 0.15;
-      const d = a.type === 'straight' ? `M${sx},${sy} L${ex},${ey}` : `M${sx},${sy} Q${mx},${my} ${ex},${ey}`;
+      const d = `M${sx},${sy} L${ex},${ey}`;
 
       const isSelected = State.selectedArrowIdx === idx;
       const markerColor = player.away ? 'url(#arr-m-b)' : 'url(#arr-m-r)';
@@ -389,7 +400,6 @@ const Renderer = (() => {
         d: d, fill: 'none', class: 'arrow-path',
         stroke: isSelected ? '#fff' : strokeColor,
         'stroke-width': isSelected ? '3.5' : '2.5',
-        'stroke-dasharray': a.type === 'straight' ? '6,3' : '0',
         'marker-end': isSelected ? 'url(#arr-m-w)' : markerColor
       });
       if (isSelected) path.setAttribute('filter', 'url(#glow)');
@@ -442,16 +452,30 @@ const Renderer = (() => {
     layer.innerHTML = '';
 
     State.zones.forEach((z, idx) => {
-      const circle = createSVG('circle', {
-        cx: z.x, cy: z.y, r: z.r || 45,
+      const shape = z.shape || 'ellipse';
+      const attrs = {
         fill: 'rgba(255,200,50,0.08)',
         stroke: 'rgba(255,200,50,0.45)',
         'stroke-width': '1.5',
         'stroke-dasharray': '6,3',
         'data-zone-idx': idx
-      });
-      circle.style.cursor = State.currentTool === 'erase' ? 'not-allowed' : 'pointer';
-      layer.appendChild(circle);
+      };
+      let el;
+      if (shape === 'rect') {
+        // 새 포맷: x,y = 좌상단, w,h / 구 포맷: x,y = 중심, r
+        const x = z.w !== undefined ? z.x : z.x - (z.r || 45);
+        const y = z.h !== undefined ? z.y : z.y - (z.r || 45) * 0.65;
+        const w = z.w !== undefined ? z.w : (z.r || 45) * 2;
+        const h = z.h !== undefined ? z.h : (z.r || 45) * 1.3;
+        el = createSVG('rect', { ...attrs, x, y, width: w, height: h });
+      } else {
+        // 새 포맷: x,y = 중심, rx,ry / 구 포맷: x,y = 중심, r
+        const rx = z.rx !== undefined ? z.rx : (z.r || 45);
+        const ry = z.ry !== undefined ? z.ry : (z.r || 45) * 0.65;
+        el = createSVG('ellipse', { ...attrs, cx: z.x, cy: z.y, rx, ry });
+      }
+      el.style.cursor = State.currentTool === 'erase' ? 'not-allowed' : 'pointer';
+      layer.appendChild(el);
     });
   }
 
@@ -483,21 +507,22 @@ const Renderer = (() => {
     layer.innerHTML = '';
     if (!State.ball.visible) return;
 
-    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    g.setAttribute('transform', `translate(${State.ball.x}, ${State.ball.y})`);
-    g.setAttribute('id', 'ball-token');
-    g.style.cursor = 'grab';
-
-    const shadow = createSVG('ellipse', { cx: 1, cy: 10, rx: 8, ry: 3, fill: 'rgba(0,0,0,0.3)' });
-    g.appendChild(shadow);
-
-    const c = createSVG('circle', { r: 9, fill: '#f0f0f0', stroke: '#333', 'stroke-width': 1 });
-    g.appendChild(c);
-
-    const pat = createSVG('path', { d: 'M0,-5 L3,1 L-3,1 Z M0,5 L-3,-1 L3,-1 Z', fill: '#333', opacity: 0.5 });
-    g.appendChild(pat);
-
-    layer.appendChild(g);
+    const bx = State.ball.x, by = State.ball.y;
+    layer.innerHTML = `
+      <g transform="translate(${bx},${by})" id="ball-token" style="cursor:grab">
+        <ellipse cx="1" cy="11" rx="8" ry="3" fill="rgba(0,0,0,0.28)"/>
+        <g clip-path="url(#ball-clip)">
+          <circle r="9" fill="url(#ball-grad)"/>
+          <polygon points="0,-4.5 4.28,-1.39 2.64,3.64 -2.64,3.64 -4.28,-1.39" fill="#1a1a1a"/>
+          <polygon points="0,-9.65 2.14,-8.09 1.32,-5.58 -1.32,-5.58 -2.14,-8.09" fill="#1a1a1a"/>
+          <polygon points="9.18,-2.97 8.36,-0.46 5.72,-0.46 4.90,-2.97 7.04,-4.53" fill="#1a1a1a"/>
+          <polygon points="5.67,7.81 3.03,7.81 2.21,5.30 4.35,3.74 6.49,5.30" fill="#1a1a1a"/>
+          <polygon points="-5.67,7.81 -3.03,7.81 -2.21,5.30 -4.35,3.74 -6.49,5.30" fill="#1a1a1a"/>
+          <polygon points="-9.18,-2.97 -8.36,-0.46 -5.72,-0.46 -4.90,-2.97 -7.04,-4.53" fill="#1a1a1a"/>
+        </g>
+        <circle r="9" fill="none" stroke="#aaa" stroke-width="0.5"/>
+      </g>
+    `;
   }
 
   function createSVG(tag, attrs) {
@@ -636,7 +661,7 @@ const InputHandler = (() => {
 
       if (tool === 'zone') {
         State.pushUndo();
-        State.zones.push({ x: player.x, y: player.y, r: 45 });
+        State.zones.push({ x: player.x, y: player.y, r: 45, shape: State.currentZoneShape });
         Renderer.renderAll();
         return;
       }
@@ -675,7 +700,7 @@ const InputHandler = (() => {
     }
 
     if (tool === 'zone') {
-      drawingZone = { x: svgPt.x, y: svgPt.y, startPt: svgPt };
+      drawingZone = { startX: svgPt.x, startY: svgPt.y };
       State.pushUndo();
       return;
     }
@@ -737,12 +762,10 @@ const InputHandler = (() => {
       drawLayer.innerHTML = '';
       const sx = drawingArrow.sx, sy = drawingArrow.sy;
       const x = svgPt.x, y = svgPt.y;
-      const mx = (sx + x) / 2 + (y - sy) * 0.15;
-      const my = (sy + y) / 2 - (x - sx) * 0.15;
       const path = Renderer.createSVG('path', {
-        d: `M${sx},${sy} Q${mx},${my} ${x},${y}`,
+        d: `M${sx},${sy} L${x},${y}`,
         fill: 'none', stroke: 'rgba(255,255,255,0.6)', 'stroke-width': 2,
-        'stroke-dasharray': '6,3', 'marker-end': 'url(#arr-m-w)'
+        'marker-end': 'url(#arr-m-w)'
       });
       drawLayer.appendChild(path);
       return;
@@ -763,13 +786,21 @@ const InputHandler = (() => {
     if (drawingZone) {
       if (!drawLayer) return;
       drawLayer.innerHTML = '';
-      const r = Math.hypot(svgPt.x - drawingZone.x, svgPt.y - drawingZone.y);
-      const circle = Renderer.createSVG('circle', {
-        cx: drawingZone.x, cy: drawingZone.y, r: Math.max(10, r),
+      const dx = Math.abs(svgPt.x - drawingZone.startX);
+      const dy = Math.abs(svgPt.y - drawingZone.startY);
+      const zAttrs = {
         fill: 'rgba(255,200,50,0.1)', stroke: 'rgba(255,200,50,0.5)',
         'stroke-width': 1.5, 'stroke-dasharray': '6,3'
-      });
-      drawLayer.appendChild(circle);
+      };
+      let zEl;
+      if (State.currentZoneShape === 'rect') {
+        const rx = Math.min(drawingZone.startX, svgPt.x);
+        const ry = Math.min(drawingZone.startY, svgPt.y);
+        zEl = Renderer.createSVG('rect', { ...zAttrs, x: rx, y: ry, width: Math.max(5, dx), height: Math.max(5, dy) });
+      } else {
+        zEl = Renderer.createSVG('ellipse', { ...zAttrs, cx: drawingZone.startX, cy: drawingZone.startY, rx: Math.max(5, dx), ry: Math.max(5, dy) });
+      }
+      drawLayer.appendChild(zEl);
       return;
     }
 
@@ -799,7 +830,7 @@ const InputHandler = (() => {
         State.arrows.push({
           playerId: drawingArrow.playerId,
           ex: svgPt.x, ey: svgPt.y,
-          type: 'curved'
+          type: 'straight'
         });
       }
       drawingArrow = null;
@@ -825,9 +856,26 @@ const InputHandler = (() => {
     }
 
     if (drawingZone && svgPt) {
-      const r = Math.hypot(svgPt.x - drawingZone.x, svgPt.y - drawingZone.y);
-      if (r > 10) {
-        State.zones.push({ x: drawingZone.x, y: drawingZone.y, r: Math.max(15, r) });
+      const dx = Math.abs(svgPt.x - drawingZone.startX);
+      const dy = Math.abs(svgPt.y - drawingZone.startY);
+      if (dx > 10 || dy > 10) {
+        if (State.currentZoneShape === 'rect') {
+          State.zones.push({
+            shape: 'rect',
+            x: Math.min(drawingZone.startX, svgPt.x),
+            y: Math.min(drawingZone.startY, svgPt.y),
+            w: Math.max(10, dx),
+            h: Math.max(10, dy)
+          });
+        } else {
+          State.zones.push({
+            shape: 'ellipse',
+            x: drawingZone.startX,
+            y: drawingZone.startY,
+            rx: Math.max(10, dx),
+            ry: Math.max(10, dy)
+          });
+        }
       }
       drawingZone = null;
       if (drawLayer) drawLayer.innerHTML = '';
@@ -864,9 +912,9 @@ const InputHandler = (() => {
       items.push({ divider: true });
       items.push({ label: '➡ 화살표 추가', action: () => { UI.setTool('arrow'); } });
       items.push({ label: '⇢ 패스 라인 추가', action: () => { UI.setTool('pass'); } });
-      items.push({ label: '◎ 압박 존 추가', action: () => {
+      items.push({ label: '◎ 선수 영역 추가', action: () => {
         State.pushUndo();
-        State.zones.push({ x: player.x, y: player.y, r: 45 });
+        State.zones.push({ x: player.x, y: player.y, r: 45, shape: State.currentZoneShape });
         Renderer.renderAll();
       }});
       items.push({ divider: true });
@@ -875,7 +923,7 @@ const InputHandler = (() => {
         State.arrows = State.arrows.filter(a => a.playerId !== player.id);
         Renderer.renderAll();
       }});
-      items.push({ label: '🗑 선수 삭제', danger: true, action: () => {
+      items.push({ label: '선수 삭제', danger: true, action: () => {
         State.pushUndo();
         State.players = State.players.filter(p => p.id !== player.id);
         State.arrows = State.arrows.filter(a => a.playerId !== player.id);
@@ -884,14 +932,14 @@ const InputHandler = (() => {
         UI.updateEditor();
       }});
     } else {
-      items.push({ label: '⚽ 여기에 공 배치', action: () => {
+      items.push({ label: '여기에 공 배치', action: () => {
         State.pushUndo();
         State.ball.x = svgPt.x; State.ball.y = svgPt.y; State.ball.visible = true;
         Renderer.renderAll();
       }});
-      items.push({ label: '◎ 여기에 압박 존', action: () => {
+      items.push({ label: '◎ 여기에 선수 영역', action: () => {
         State.pushUndo();
-        State.zones.push({ x: svgPt.x, y: svgPt.y, r: 45 });
+        State.zones.push({ x: svgPt.x, y: svgPt.y, r: 45, shape: State.currentZoneShape });
         Renderer.renderAll();
       }});
     }
@@ -1324,7 +1372,7 @@ const UI = (() => {
     { id: 'select', icon: '↖', label: '선택 / 이동', key: '1' },
     { id: 'arrow', icon: '➡', label: '움직임 화살표', key: '2' },
     { id: 'pass', icon: '⇢', label: '패스 라인', key: '3' },
-    { id: 'zone', icon: '◎', label: '압박 존', key: '4' },
+    { id: 'zone', icon: '◎', label: '선수 영역', key: '4' },
     { id: 'freedraw', icon: '✎', label: '자유 그리기', key: '5' },
     { id: 'erase', icon: '✕', label: '지우개', key: '6' },
     { id: 'ball', icon: '⚽', label: '공 배치', key: '7' },
@@ -1391,6 +1439,9 @@ const UI = (() => {
     const t = TOOLS.find(t => t.id === tool);
     document.getElementById('mode-label').textContent = '도구: ' + (t ? t.label : tool);
 
+    const shapeSel = document.getElementById('zone-shape-selector');
+    shapeSel.style.display = tool === 'zone' ? 'flex' : 'none';
+
     const svg = document.getElementById('pitch-svg');
     const cursors = { select: 'default', arrow: 'crosshair', pass: 'crosshair', zone: 'cell', erase: 'not-allowed', ball: 'copy', freedraw: 'crosshair' };
     svg.style.cursor = cursors[tool] || 'default';
@@ -1412,7 +1463,7 @@ const UI = (() => {
       playerId: State.selectedId,
       ex: Math.max(20, Math.min(State.PITCH_W-20, p.x + d.dx * len)),
       ey: Math.max(20, Math.min(State.PITCH_H-20, p.y + d.dy * len)),
-      type: 'curved'
+      type: 'straight'
     });
     Renderer.renderAll();
   }
@@ -1522,6 +1573,18 @@ const UI = (() => {
       Renderer.renderAll();
       updateEditor();
       Toast.show('🗑️ 선수가 삭제되었습니다');
+    });
+
+    // Zone shape selector
+    document.getElementById('shape-ellipse').addEventListener('click', () => {
+      State.currentZoneShape = 'ellipse';
+      document.querySelectorAll('.zone-shape-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('shape-ellipse').classList.add('active');
+    });
+    document.getElementById('shape-rect').addEventListener('click', () => {
+      State.currentZoneShape = 'rect';
+      document.querySelectorAll('.zone-shape-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('shape-rect').classList.add('active');
     });
 
     // Memo

@@ -303,6 +303,12 @@ body {
   white-space: nowrap;
 }
 
+.zone-shape-btn.active {
+  background: rgba(232,69,60,0.2);
+  border-color: rgba(232,69,60,0.5);
+  color: #ff8a85;
+}
+
 /* Pitch canvas area */
 #pitch-container {
   flex: 1;
@@ -319,6 +325,9 @@ body {
   cursor: default;
   max-width: 100%;
   max-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #pitch-svg {
@@ -326,6 +335,8 @@ body {
   border-radius: 4px;
   overflow: visible;
   max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
   touch-action: none;
 }
