@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TactiCal — 축구 전술 시뮬레이터</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- LEFT SIDEBAR -->
+<div id="sidebar">
+  <div class="logo">
+    <span class="logo-main">TactiCal</span>
+    <span class="logo-sub">전술 보드</span>
+  </div>
+
+  <div class="section-title">홈팀 포메이션</div>
+  <div class="formation-grid" id="home-formations"></div>
+
+  <div class="section-title">상대팀 포메이션</div>
+  <div class="formation-grid" id="away-formations"></div>
+
+  <div class="section-title">도구</div>
+  <div class="tool-group" id="tool-group"></div>
+
+  <div class="section-title">장면 관리</div>
+  <div class="scene-list" id="scene-list"></div>
+  <div style="padding: 0 10px 10px;">
+    <button class="scene-add-btn" id="btn-add-scene">＋ 새 장면 추가</button>
+  </div>
+
+  <div style="flex:1"></div>
+
+  <div style="padding: 10px; border-top: 1px solid var(--ui-border); display:flex; flex-direction:column; gap:4px;">
+    <button class="tool-btn" id="btn-add-player" style="justify-content:center; font-size:11px; color:#5af0a0; border-color:rgba(40,180,80,0.3);">
+      ＋ 선수 추가
+    </button>
+    <button class="tool-btn" id="btn-clear-arrows" style="justify-content:center; font-size:11px; color:#ff7070; border-color:rgba(220,50,50,0.3);">
+      ✕ 그리기 전체 삭제
+    </button>
+  </div>
+</div>
+
+<!-- MAIN PITCH -->
+<div id="main">
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <button class="tb-btn" id="toggle-sidebar-btn" style="padding:6px 8px;">☰</button>
+    <button class="tb-btn primary" id="play-btn">▶ PLAY</button>
+    <button class="tb-btn" id="btn-reset">↺ 초기화</button>
+    <div class="tb-divider"></div>
+    <span class="tb-label">속도</span>
+    <input type="range" min="0.5" max="3" step="0.5" value="1" id="speed-slider" style="width:80px; accent-color: var(--accent);">
+    <span id="speed-label" style="font-size:11px; color:var(--ui-muted); min-width:24px;">1×</span>
+    <div class="tb-divider"></div>
+    <button class="tb-btn" id="btn-undo">↩ 실행취소</button>
+    <button class="tb-btn" id="btn-redo">↪ 다시실행</button>
+    <div class="tb-divider"></div>
+    <button class="tb-btn success" id="btn-export-png">📷 PNG 저장</button>
+    <button class="tb-btn" id="btn-export-json">💾 JSON 저장</button>
+    <button class="tb-btn" id="btn-import-json">📂 불러오기</button>
+    <div class="tb-divider"></div>
+    <span class="tb-label" id="mode-label">도구: 선택 / 이동</span>
+  </div>
+
+  <!-- Pitch -->
+  <div id="pitch-container">
+    <div id="anim-indicator">● PLAYING</div>
+    <div id="anim-progress-container">
+      <div id="anim-progress-bar"><div id="anim-progress-fill"></div></div>
+    </div>
+    <button class="sidebar-toggle" id="toggle-left">‹</button>
+    <button class="sidebar-toggle" id="toggle-right">›</button>
+    <div id="pitch-canvas">
+      <svg id="pitch-svg" viewBox="0 0 800 540" preserveAspectRatio="xMidYMid meet" width="800" height="540"></svg>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div id="right-panel">
+  <div id="player-editor">
+    <div class="editor-title">선수 정보</div>
+    <div class="editor-empty" id="editor-empty">선수를 클릭하면<br>편집할 수 있습니다</div>
+    <div id="editor-fields" style="display:none;">
+      <div class="field-row">
+        <label class="field-label">이름</label>
+        <input class="field-input" id="f-name" placeholder="선수 이름">
+      </div>
+      <div class="field-row-2col">
+        <div>
+          <label class="field-label">등번호</label>
+          <input class="field-input" id="f-number" type="number" min="1" max="99" placeholder="10">
+        </div>
+        <div>
+          <label class="field-label">포지션</label>
+          <input class="field-input" id="f-pos" placeholder="CF">
+        </div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <label class="field-label">움직임 방향 빠른 설정</label>
+        <div class="arrow-btns" id="quick-arrow-btns"></div>
+      </div>
+      <button class="delete-btn" id="btn-delete-player">이 선수 삭제</button>
+    </div>
+  </div>
+
+  <div id="memo-panel">
+    <div class="memo-header">
+      <div class="editor-title" style="margin-bottom:0">장면 메모</div>
+      <span style="font-size:10px;color:var(--ui-muted)" id="memo-scene-label">장면 1</span>
+    </div>
+    <textarea id="memo-textarea" placeholder="이 장면의 전술 설명을 입력하세요...&#10;&#10;예) 좌측 측면으로 공을 전개하고 10번이 공간 침투..."></textarea>
+  </div>
+</div>
+
+<!-- Context Menu -->
+<div id="context-menu"></div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- Hidden file input -->
+<input type="file" id="file-input" accept=".json" style="display:none">
+
+<script src="app.js"></script>
+</body>
+</html>
