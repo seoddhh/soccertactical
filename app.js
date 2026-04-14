@@ -23,6 +23,7 @@ const State = (() => {
   let undoStack = [];
   let redoStack = [];
   let currentZoneShape = 'ellipse';
+  let lastArrows = [];
 
   const PITCH_W = 900;
   const PITCH_H = 607;
@@ -101,6 +102,8 @@ const State = (() => {
     get redoStack() { return redoStack; },
     get currentZoneShape() { return currentZoneShape; },
     set currentZoneShape(v) { currentZoneShape = v; },
+    get lastArrows() { return lastArrows; },
+    set lastArrows(v) { lastArrows = v; },
   };
 })();
 
@@ -156,8 +159,8 @@ const Formations = (() => {
     ]
   };
 
-  const POS_HOME = ['GK','LB','CB','CB','RB','CDM','CM','CDM','CAM','RW','ST','LW'];
-  const POS_AWAY = ['GK','RB','CB','CB','LB','CM','CM','CAM','LW','ST','RW'];
+  const POS_HOME = ['GK','DF','DF','DF','DF','MF','MF','MF','FW','FW','FW'];
+  const POS_AWAY = ['GK','DF','DF','DF','DF','MF','MF','MF','FW','FW','FW'];
 
   function apply(name, away = false) {
     const positions = PRESETS[name] || PRESETS['4-3-3'];
@@ -375,11 +378,15 @@ const Renderer = (() => {
     if (!layer) return;
     layer.innerHTML = '';
 
+    // 애니메이션 재생 중에는 화살표 숨김
+    if (State.isPlaying) return;
+
     State.arrows.forEach((a, idx) => {
       const player = State.players.find(p => p.id === a.playerId);
       if (!player) return;
 
-      const sx = player.x, sy = player.y;
+      const sx = (a.fromPlayer === false && a.sx != null) ? a.sx : player.x;
+      const sy = (a.fromPlayer === false && a.sy != null) ? a.sy : player.y;
       const ex = a.ex, ey = a.ey;
       const d = `M${sx},${sy} L${ex},${ey}`;
 
@@ -404,6 +411,17 @@ const Renderer = (() => {
       });
       if (isSelected) path.setAttribute('filter', 'url(#glow)');
       layer.appendChild(path);
+
+      // Endpoint dot (chaining indicator - always visible when not selected)
+      if (!isSelected) {
+        const dot = createSVG('circle', {
+          cx: ex, cy: ey, r: 4,
+          fill: player.away ? 'rgba(100,180,255,0.9)' : 'rgba(255,100,90,0.9)',
+          stroke: 'rgba(0,0,0,0.4)', 'stroke-width': 1
+        });
+        dot.style.cursor = State.currentTool === 'arrow' ? 'crosshair' : 'default';
+        layer.appendChild(dot);
+      }
 
       // End point handle (when selected)
       if (isSelected) {
@@ -571,6 +589,14 @@ const InputHandler = (() => {
     return Math.hypot(State.ball.x - svgPt.x, State.ball.y - svgPt.y) < 12;
   }
 
+  function findArrowEndpointAt(svgPt) {
+    for (let i = State.arrows.length - 1; i >= 0; i--) {
+      const a = State.arrows[i];
+      if (Math.hypot(a.ex - svgPt.x, a.ey - svgPt.y) < 12) return a;
+    }
+    return null;
+  }
+
   function setup() {
     const svg = document.getElementById('pitch-svg');
     svg.addEventListener('pointerdown', onPointerDown, { passive: false });
@@ -590,6 +616,16 @@ const InputHandler = (() => {
       dragging = { type: 'arrow-handle', idx, startPt: svgPt };
       State.pushUndo();
       return;
+    }
+
+    // Check arrow endpoint for chaining (arrow tool takes priority over hit area)
+    if (tool === 'arrow') {
+      const nearEndpoint = findArrowEndpointAt(svgPt);
+      if (nearEndpoint) {
+        drawingArrow = { playerId: nearEndpoint.playerId, sx: nearEndpoint.ex, sy: nearEndpoint.ey, fromPlayer: false };
+        State.pushUndo();
+        return;
+      }
     }
 
     // Check arrow hit area click (for select/erase)
@@ -667,7 +703,7 @@ const InputHandler = (() => {
       }
 
       if (tool === 'arrow') {
-        drawingArrow = { playerId: player.id, sx: player.x, sy: player.y };
+        drawingArrow = { playerId: player.id, sx: player.x, sy: player.y, fromPlayer: true };
         State.pushUndo();
         return;
       }
@@ -829,6 +865,9 @@ const InputHandler = (() => {
       if (dist > 15) {
         State.arrows.push({
           playerId: drawingArrow.playerId,
+          fromPlayer: drawingArrow.fromPlayer !== false,
+          sx: drawingArrow.sx,
+          sy: drawingArrow.sy,
           ex: svgPt.x, ey: svgPt.y,
           type: 'straight'
         });
@@ -999,6 +1038,48 @@ const ContextMenu = (() => {
 
 
 // ========================
+// MODULE: ConfirmDialog
+// ========================
+const ConfirmDialog = (() => {
+  function show(message, onConfirm) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;';
+
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e2a1e;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:28px 24px 20px;max-width:300px;width:90%;text-align:center;font-family:\'Noto Sans KR\',sans-serif;';
+
+    const msg = document.createElement('p');
+    msg.style.cssText = 'margin:0 0 22px;font-size:15px;color:#fff;line-height:1.6;white-space:pre-line;';
+    msg.textContent = message;
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:10px;justify-content:center;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '취소';
+    cancelBtn.style.cssText = 'padding:8px 22px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:#fff;cursor:pointer;font-size:13px;';
+    cancelBtn.addEventListener('click', () => document.body.removeChild(overlay));
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.textContent = '초기화';
+    confirmBtn.style.cssText = 'padding:8px 22px;background:#e8453c;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;';
+    confirmBtn.addEventListener('click', () => { document.body.removeChild(overlay); onConfirm(); });
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(confirmBtn);
+    box.appendChild(msg);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) document.body.removeChild(overlay); });
+  }
+
+  return { show };
+})();
+
+
+// ========================
 // MODULE: Animation
 // ========================
 const Animation = (() => {
@@ -1015,8 +1096,17 @@ const Animation = (() => {
 
   function start() {
     if (State.arrows.length === 0) {
-      Toast.show('⚠️ 먼저 선수들의 움직임 화살표를 설정하세요!', 'error');
-      return;
+      // 화살표가 없으면 마지막 애니메이션 재실행 시도
+      if (State.lastArrows && State.lastArrows.length > 0) {
+        State.players.forEach(p => {
+          if (p.animStartX !== undefined) { p.x = p.animStartX; p.y = p.animStartY; }
+        });
+        State.arrows = JSON.parse(JSON.stringify(State.lastArrows));
+        Renderer.renderAll();
+      } else {
+        Toast.show('⚠️ 먼저 선수들의 움직임 화살표를 설정하세요!', 'error');
+        return;
+      }
     }
 
     State.isPlaying = true;
@@ -1039,16 +1129,25 @@ const Animation = (() => {
 
     function animate(now) {
       const t = Math.min((now - animStartTime) / dur, 1);
-      const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t;
 
       document.getElementById('anim-progress-fill').style.width = (t * 100) + '%';
 
       State.players.forEach(p => {
-        const arrs = playerArrows[p.id];
-        if (!arrs || arrs.length === 0) return;
-        const a = arrs[arrs.length - 1];
-        p.x = p.animStartX + (a.ex - p.animStartX) * ease;
-        p.y = p.animStartY + (a.ey - p.animStartY) * ease;
+        const chain = playerArrows[p.id];
+        if (!chain || chain.length === 0) return;
+
+        const segCount = chain.length;
+        const segProgress = t * segCount;
+        const rawSegIdx = Math.floor(segProgress);
+        const segIdx = Math.min(rawSegIdx, segCount - 1);
+        const segFrac = rawSegIdx >= segCount ? 1 : (segProgress - rawSegIdx);
+        const ease = segFrac < 0.5 ? 2*segFrac*segFrac : -1+(4-2*segFrac)*segFrac;
+
+        const seg = chain[segIdx];
+        const startX = (seg.fromPlayer === false && seg.sx != null) ? seg.sx : p.animStartX;
+        const startY = (seg.fromPlayer === false && seg.sy != null) ? seg.sy : p.animStartY;
+        p.x = startX + (seg.ex - startX) * ease;
+        p.y = startY + (seg.ey - startY) * ease;
       });
 
       Renderer.renderAll();
@@ -1076,9 +1175,15 @@ const Animation = (() => {
     document.getElementById('anim-progress-fill').style.width = '0%';
 
     if (resetPos) {
+      // 수동 STOP: 선수 위치 되돌리기
       State.players.forEach(p => {
         if (p.animStartX !== undefined) { p.x = p.animStartX; p.y = p.animStartY; }
       });
+      Renderer.renderAll();
+    } else {
+      // 자연 완료: 화살표를 저장 후 삭제, 선수는 도착 위치 유지
+      State.lastArrows = JSON.parse(JSON.stringify(State.arrows));
+      State.arrows = [];
       Renderer.renderAll();
     }
   }
@@ -1087,8 +1192,10 @@ const Animation = (() => {
     if (State.isPlaying) stop();
     State.pushUndo();
     State.players.forEach(p => { p.x = p.startX; p.y = p.startY; });
+    State.arrows = [];
+    State.lastArrows = [];
     Renderer.renderAll();
-    Toast.show('🔄 선수 위치가 초기화되었습니다');
+    Toast.show('🔄 초기화되었습니다');
   }
 
   return { toggle, start, stop, reset };
@@ -1378,12 +1485,9 @@ const UI = (() => {
     { id: 'ball', icon: '⚽', label: '공 배치', key: '7' },
   ];
 
-  const QUICK_ARROWS = ['↖','↑','↗','←','→','↙','↓','↘'];
-
   function init() {
     buildFormations();
     buildTools();
-    buildQuickArrows();
     bindEvents();
   }
 
@@ -1419,17 +1523,6 @@ const UI = (() => {
     });
   }
 
-  function buildQuickArrows() {
-    const container = document.getElementById('quick-arrow-btns');
-    QUICK_ARROWS.forEach(dir => {
-      const btn = document.createElement('button');
-      btn.className = 'arrow-btn';
-      btn.textContent = dir;
-      btn.addEventListener('click', () => addQuickArrow(dir));
-      container.appendChild(btn);
-    });
-  }
-
   function setTool(tool) {
     State.currentTool = tool;
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1445,27 +1538,6 @@ const UI = (() => {
     const svg = document.getElementById('pitch-svg');
     const cursors = { select: 'default', arrow: 'crosshair', pass: 'crosshair', zone: 'cell', erase: 'not-allowed', ball: 'copy', freedraw: 'crosshair' };
     svg.style.cursor = cursors[tool] || 'default';
-  }
-
-  function addQuickArrow(dir) {
-    if (!State.selectedId) return;
-    const p = State.players.find(p => p.id === State.selectedId);
-    if (!p) return;
-    const DIRS = {
-      '↑':{dx:0,dy:-1},'↗':{dx:0.7,dy:-0.7},'→':{dx:1,dy:0},'↘':{dx:0.7,dy:0.7},
-      '↓':{dx:0,dy:1},'↙':{dx:-0.7,dy:0.7},'←':{dx:-1,dy:0},'↖':{dx:-0.7,dy:-0.7}
-    };
-    const d = DIRS[dir];
-    if (!d) return;
-    State.pushUndo();
-    const len = 80;
-    State.arrows.push({
-      playerId: State.selectedId,
-      ex: Math.max(20, Math.min(State.PITCH_W-20, p.x + d.dx * len)),
-      ey: Math.max(20, Math.min(State.PITCH_H-20, p.y + d.dy * len)),
-      type: 'straight'
-    });
-    Renderer.renderAll();
   }
 
   function updateEditor() {
@@ -1489,7 +1561,9 @@ const UI = (() => {
   function bindEvents() {
     // Toolbar
     document.getElementById('play-btn').addEventListener('click', Animation.toggle);
-    document.getElementById('btn-reset').addEventListener('click', Animation.reset);
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      ConfirmDialog.show('전부 초기화 하시겠습니까?\n선수 위치와 모든 화살표를 초기화합니다.', Animation.reset);
+    });
     document.getElementById('btn-undo').addEventListener('click', () => {
       if (State.undo()) { Renderer.renderAll(); UI.updateEditor(); Toast.show('↩ 실행취소'); }
     });
